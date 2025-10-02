@@ -1,0 +1,160 @@
+# podmonitoring-gpu.yaml
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: dcgm-exporter-monitoring
+  namespace: gmp-system
+spec:
+  selector:
+    matchLabels:
+      app: nvidia-dcgm-exporter
+  endpoints:
+  - port: metrics
+    interval: 30s
+    metricRelabeling:
+    - sourceLabels: [__name__]
+      regex: 'dcgm_.*'
+      action: keep
+---
+# Custom metrics exporter with GMP support
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: custom-metrics-exporter
+  namespace: default
+data:
+  metrics_exporter.py: |
+    #!/usr/bin/env python3
+    import time
+    import subprocess
+    import psutil
+    from prometheus_client import start_http_server, Gauge, Histogram
+    import logging
+    
+    logging.basicConfig(level=logging.INFO)
+    
+    # Define metrics
+    gpu_util = Gauge('custom_gpu_utilization', 'GPU utilization percentage', ['gpu_id'])
+    nvenc_sessions = Gauge('custom_nvenc_sessions', 'Number of NVENC sessions', ['gpu_id'])
+    disk_read_rate = Gauge('custom_disk_read_kb_per_sec', 'Disk read rate in KB/s', ['device'])
+    disk_write_rate = Gauge('custom_disk_write_kb_per_sec', 'Disk write rate in KB/s', ['device'])
+    video_queue_depth = Gauge('video_queue_depth', 'Number of videos in processing queue')
+    processing_latency = Histogram('video_processing_duration_seconds', 'Video processing duration')
+    
+    def collect_gpu_metrics():
+        try:
+            result = subprocess.run(
+                ['nvidia-smi', '--query-gpu=index,utilization.gpu,encoder.stats.sessionCount', 
+                 '--format=csv,noheader,nounits'],
+                capture_output=True, text=True
+            )
+            for line in result.stdout.strip().split('\n'):
+                parts = line.split(', ')
+                if len(parts) >= 3:
+                    gpu_id = parts[0]
+                    util = float(parts[1])
+                    sessions = int(parts[2]) if parts[2] else 0
+                    gpu_util.labels(gpu_id=gpu_id).set(util)
+                    nvenc_sessions.labels(gpu_id=gpu_id).set(sessions)
+        except Exception as e:
+            logging.error(f"Error collecting GPU metrics: {e}")
+    
+    def collect_disk_metrics():
+        try:
+            disk_io = psutil.disk_io_counters(perdisk=True)
+            for disk, counters in disk_io.items():
+                disk_read_rate.labels(device=disk).set(counters.read_bytes / 1024)
+                disk_write_rate.labels(device=disk).set(counters.write_bytes / 1024)
+        except Exception as e:
+            logging.error(f"Error collecting disk metrics: {e}")
+    
+    if __name__ == '__main__':
+        # Start Prometheus metrics server
+        start_http_server(8000)
+        logging.info("Metrics server started on port 8000")
+        
+        while True:
+            collect_gpu_metrics()
+            collect_disk_metrics()
+            time.sleep(10)
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: custom-metrics-exporter
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: custom-metrics-exporter
+  template:
+    metadata:
+      labels:
+        app: custom-metrics-exporter
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+    spec:
+      containers:
+      - name: metrics-exporter
+        image: python:3.9-slim
+        command: ["python3", "/app/metrics_exporter.py"]
+        ports:
+        - containerPort: 8000
+          name: metrics
+        volumeMounts:
+        - name: metrics-script
+          mountPath: /app
+        - name: nvidia-smi
+          mountPath: /usr/bin/nvidia-smi
+        env:
+        - name: NVIDIA_VISIBLE_DEVICES
+          value: "all"
+        - name: NVIDIA_DRIVER_CAPABILITIES
+          value: "utility"
+        lifecycle:
+          postStart:
+            exec:
+              command:
+              - /bin/sh
+              - -c
+              - |
+                pip install prometheus-client psutil
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        securityContext:
+          privileged: true
+      volumes:
+      - name: metrics-script
+        configMap:
+          name: custom-metrics-exporter
+      - name: nvidia-smi
+        hostPath:
+          path: /usr/bin/nvidia-smi
+          type: File
+      nodeSelector:
+        cloud.google.com/gke-accelerator: nvidia-tesla-t4
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+
+---
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: custom-metrics-monitoring
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: custom-metrics-exporter
+  endpoints:
+  - port: metrics
+    interval: 30s
