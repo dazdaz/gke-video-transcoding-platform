@@ -1,0 +1,23 @@
+apiVersion: monitoring.googleapis.com/v1
+kind: ClusterPodMonitoring
+metadata:
+  name: nvidia-dcgm-exporter
+spec:
+  selector:
+    matchLabels:
+      app: nvidia-dcgm-exporter
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+    metricRelabeling:
+    # Keep only DCGM metrics
+    - sourceLabels: [__name__]
+      regex: 'DCGM.*'
+      action: keep
+  targetLabels:
+    metadata:
+    - pod
+    - container
+    - namespace
+    - node
