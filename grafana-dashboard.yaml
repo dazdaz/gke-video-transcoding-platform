@@ -1,0 +1,66 @@
+# grafana-dashboard.yaml
+displayName: "GPU Transcoding Dashboard"
+mosaicLayout:
+  columns: 12
+  tiles:
+  - width: 6
+    height: 4
+    widget:
+      title: "GPU Utilization"
+      xyChart:
+        dataSets:
+        - timeSeriesQuery:
+            prometheusQuery: |
+              avg(dcgm_gpu_utilization) by (gpu_id)
+          plotType: LINE
+  - xPos: 6
+    width: 6
+    height: 4
+    widget:
+      title: "NVENC Sessions"
+      xyChart:
+        dataSets:
+        - timeSeriesQuery:
+            prometheusQuery: |
+              sum(custom_nvenc_sessions) by (gpu_id)
+          plotType: LINE
+  - yPos: 4
+    width: 6
+    height: 4
+    widget:
+      title: "Queue Depth"
+      xyChart:
+        dataSets:
+        - timeSeriesQuery:
+            prometheusQuery: |
+              rabbitmq_queue_messages_ready{queue="video-compression"}
+          plotType: LINE
+  - xPos: 6
+    yPos: 4
+    width: 6
+    height: 4
+    widget:
+      title: "Processing Latency (P95)"
+      xyChart:
+        dataSets:
+        - timeSeriesQuery:
+            prometheusQuery: |
+              histogram_quantile(0.95, rate(video_processing_duration_seconds_bucket[5m]))
+          plotType: LINE
+  - yPos: 8
+    width: 12
+    height: 4
+    widget:
+      title: "Disk I/O"
+      xyChart:
+        dataSets:
+        - timeSeriesQuery:
+            prometheusQuery: |
+              rate(custom_disk_read_kb_per_sec[1m])
+          plotType: LINE
+          legendTemplate: "Read"
+        - timeSeriesQuery:
+            prometheusQuery: |
+              rate(custom_disk_write_kb_per_sec[1m])
+          plotType: LINE
+          legendTemplate: "Write"
