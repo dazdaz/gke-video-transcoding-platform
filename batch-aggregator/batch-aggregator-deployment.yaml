@@ -1,0 +1,53 @@
+# batch-aggregator-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: batch-aggregator
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: batch-aggregator
+  template:
+    metadata:
+      labels:
+        app: batch-aggregator
+    spec:
+      nodeSelector:
+        cloud.google.com/gke-nodepool: cpu-pool
+      containers:
+      - name: aggregator
+        image: europe-west4-docker.pkg.dev/daev-playground/transcode-repo/batch-aggregator:latest
+        env:
+        - name: BATCH_SIZE
+          value: "50"
+        - name: BATCH_TIMEOUT_SECONDS
+          value: "2"
+        - name: LOCAL_CACHE_PATH
+          value: "/cache"
+        - name: RABBITMQ_HOST
+          value: "rabbitmq-service"
+        - name: RABBITMQ_USER
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-credentials
+              key: username
+        - name: RABBITMQ_PASS
+          valueFrom:
+            secretKeyRef:
+              name: rabbitmq-credentials
+              key: password
+        volumeMounts:
+        - name: cache-volume
+          mountPath: /cache
+        resources:
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+          limits:
+            cpu: "2"
+            memory: "4Gi"
+      volumes:
+      - name: cache-volume
+        emptyDir:
+          sizeLimit: 95Gi
