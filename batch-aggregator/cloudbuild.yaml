@@ -1,0 +1,58 @@
+# cloudbuild.yaml
+steps:
+  # Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    id: Build
+    args: [
+      'build',
+      '-t', '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/batch-aggregator:${BUILD_ID}',
+      '-t', '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/batch-aggregator:latest',
+      '-f', 'Dockerfile',
+      '.'
+    ]
+
+  # Push the Docker image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    id: Push_Image
+    args: [
+      'push', '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/batch-aggregator:${BUILD_ID}'
+      # You could also push the 'latest' tag here if needed immediately,
+      # but the 'images' section at the end handles it for final state.
+      # 'push', '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/batch-aggregator:latest'
+    ]
+
+  # Deploy to GKE
+  - name: 'gcr.io/cloud-builders/gke-deploy'
+    id: Deploy
+    args:
+    - run
+    - --filename=batch-aggregator-deployment.yaml
+    - --image=${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/batch-aggregator:${BUILD_ID}
+    - --cluster=${_CLUSTER_NAME}
+    - --location=${_REGION}
+    - --namespace=default
+
+# Build configuration options
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'
+
+# Substitutions for different environments
+substitutions:
+  _PROJECT_ID: daev-playground
+  _REGION: europe-west4
+  _REPO: transcode-repo
+  _CLUSTER_NAME: tp
+
+# Build timeout
+timeout: '1200s'
+
+# Store build logs in GCS (uncomment if you want to use a specific bucket)
+#logsBucket: 'gs://vid-transcode'
+
+# Images to be pushed to Artifact Registry (Cloud Build automatically pushes these at the end of the build)
+# Keeping this is good practice, even with explicit pushes, for robustness and
+# to ensure the 'latest' tag is always pushed.
+images:
+  - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/batch-aggregator:${BUILD_ID}'
+  - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/${_REPO}/batch-aggregator:latest'
