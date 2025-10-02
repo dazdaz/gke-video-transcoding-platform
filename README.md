@@ -412,6 +412,3 @@ gcloud compute networks delete tpc-network
 - [GCS Best Practices](https://cloud.google.com/storage/docs/best-practices)
 
 ---
-
-**Maintained by:** [Your Name/Team]  
-**Last Updated:** 2024
