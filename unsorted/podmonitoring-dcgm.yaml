@@ -1,0 +1,14 @@
+# podmonitoring-dcgm.yaml
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: nvidia-dcgm-exporter
+  namespace: gmp-system
+spec:
+  selector:
+    matchLabels:
+      app: nvidia-dcgm-exporter
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
