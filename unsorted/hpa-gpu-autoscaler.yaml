@@ -1,0 +1,66 @@
+# hpa-gpu-autoscaler.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gpu-metrics-script
+data:
+  collect_metrics.sh: |
+    #!/bin/bash
+    while true; do
+      # Collect GPU metrics
+      GPU_UTIL=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits | head -1)
+      NVENC_UTIL=$(nvidia-smi --query-gpu=encoder.stats.sessionCount --format=csv,noheader,nounits | head -1)
+      
+      # Collect I/O metrics
+      DISK_READ=$(iostat -x 1 2 | grep ssd0 | tail -1 | awk '{print $6}')
+      DISK_WRITE=$(iostat -x 1 2 | grep ssd0 | tail -1 | awk '{print $7}')
+      
+      # Send to monitoring
+      curl -X POST http://monitoring-service:8080/metrics \
+        -H "Content-Type: application/json" \
+        -d "{
+          \"gpu_util\": $GPU_UTIL,
+          \"nvenc_sessions\": $NVENC_UTIL,
+          \"disk_read_kb\": $DISK_READ,
+          \"disk_write_kb\": $DISK_WRITE,
+          \"timestamp\": $(date +%s)
+        }"
+      
+      sleep 10
+    done
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: gpu-metrics-collector
+spec:
+  selector:
+    matchLabels:
+      app: gpu-metrics
+  template:
+    metadata:
+      labels:
+        app: gpu-metrics
+    spec:
+      containers:
+      - name: metrics-collector
+        image: nvidia/cuda:11.8.0-base-ubuntu22.04
+        command: ["/scripts/collect_metrics.sh"]
+        volumeMounts:
+        - name: metrics-script
+          mountPath: /scripts
+        - name: nvidia
+          mountPath: /usr/local/nvidia
+        securityContext:
+          privileged: true
+      volumes:
+      - name: metrics-script
+        configMap:
+          name: gpu-metrics-script
+          defaultMode: 0755
+      - name: nvidia
+        hostPath:
+          path: /usr/local/nvidia
+      nodeSelector:
+        cloud.google.com/gke-accelerator: nvidia-tesla-t4
