@@ -1,0 +1,128 @@
+# custom-hpa-gmp.yaml
+# First, create a Custom Metrics Adapter for GMP
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: adapter-config
+  namespace: custom-metrics
+data:
+  config.yaml: |
+    rules:
+    - seriesQuery: 'rabbitmq_queue_messages_ready{queue="video-compression"}'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: "^rabbitmq_queue_messages_ready"
+        as: "queue_depth"
+      metricsQuery: 'avg(<<.Series>>{<<.LabelMatchers>>})'
+    - seriesQuery: 'custom_gpu_utilization'
+      resources:
+        overrides:
+          namespace: {resource: "namespace"}
+          pod: {resource: "pod"}
+      name:
+        matches: "^custom_gpu_utilization"
+        as: "gpu_utilization"
+      metricsQuery: 'avg(<<.Series>>{<<.LabelMatchers>>})'
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: custom-metrics-adapter
+  namespace: custom-metrics
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: custom-metrics-adapter
+  template:
+    metadata:
+      labels:
+        app: custom-metrics-adapter
+    spec:
+      serviceAccountName: custom-metrics-adapter
+      containers:
+      - name: custom-metrics-adapter
+        image: gcr.io/gke-release/custom-metrics-stackdriver-adapter:v0.12.2
+        args:
+        - --cert-dir=/var/run/serving-cert
+        - --config=/etc/adapter/config.yaml
+        - --logtostderr=true
+        - --prometheus-address=http://prometheus-frontend.gke-gmp-system.svc:9090
+        - --secure-port=6443
+        ports:
+        - containerPort: 6443
+          name: https
+        volumeMounts:
+        - mountPath: /tmp
+          name: temp-vol
+        - mountPath: /etc/adapter/
+          name: config
+          readOnly: true
+      volumes:
+      - name: temp-vol
+        emptyDir: {}
+      - name: config
+        configMap:
+          name: adapter-config
+
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: compression-service-hpa-gmp
+  namespace: default
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: compression-service-optimized
+  minReplicas: 2
+  maxReplicas: 40
+  metrics:
+  - type: External
+    external:
+      metric:
+        name: prometheus.googleapis.com|rabbitmq_queue_messages_ready|video-compression
+        selector:
+          matchLabels:
+            resource.type: "prometheus.googleapis.com"
+      target:
+        type: AverageValue
+        averageValue: "100"
+  - type: External
+    external:
+      metric:
+        name: prometheus.googleapis.com|custom_gpu_utilization
+        selector:
+          matchLabels:
+            resource.type: "prometheus.googleapis.com"
+      target:
+        type: AverageValue
+        averageValue: "70"
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 30
+      - type: Pods
+        value: 10
+        periodSeconds: 30
+      selectPolicy: Max
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
