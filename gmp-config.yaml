@@ -1,0 +1,18 @@
+# gmp-config.yaml
+apiVersion: monitoring.googleapis.com/v1
+kind: OperatorConfig
+metadata:
+  name: config
+  namespace: gmp-public
+collection:
+  externalLabels:
+    cluster: tp
+    location: europe-west4
+    project_id: my-playground
+  filter:
+    matchOneOf:
+    - '{job="nvidia-dcgm-exporter"}'
+    - '{__name__=~"DCGM.*"}'
+features:
+  targetStatus:
+    enabled: true
