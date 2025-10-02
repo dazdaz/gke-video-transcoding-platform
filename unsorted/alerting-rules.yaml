@@ -1,0 +1,29 @@
+# alerting-rules.yaml
+apiVersion: monitoring.googleapis.com/v1
+kind: Rules
+metadata:
+  name: gpu-alerting-rules
+  namespace: gmp-system
+spec:
+  groups:
+  - name: gpu_alerts
+    interval: 30s
+    rules:
+    - alert: HighGPUUtilization
+      expr: avg(dcgm_gpu_utilization) > 90
+      for: 5m
+      annotations:
+        summary: "High GPU utilization detected"
+        description: "GPU utilization is above 90% for more than 5 minutes"
+    - alert: HighQueueDepth
+      expr: rabbitmq_queue_messages_ready{queue="video-compression"} > 1000
+      for: 2m
+      annotations:
+        summary: "High queue depth detected"
+        description: "Video compression queue has more than 1000 messages"
+    - alert: LowNVENCUtilization
+      expr: avg(custom_nvenc_sessions) < 1
+      for: 10m
+      annotations:
+        summary: "NVENC underutilized"
+        description: "NVENC encoder is not being used efficiently"
