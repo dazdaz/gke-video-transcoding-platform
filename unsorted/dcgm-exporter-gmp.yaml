@@ -1,0 +1,125 @@
+# dcgm-exporter-gmp.yaml
+# https://github.com/GoogleCloudPlatform/accelerated-platforms/tree/19ccc7b5a3bd7a903ad2ddd01f0b3b7426e27cea/platforms/gke-aiml/playground/templates/configsync/templates/_cluster_template/gmp-public/nvidia-dcgm
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dcgm-metrics-config
+  namespace: gmp-system
+data:
+  custom-collectors.csv: |
+    # Standard Metrics
+    DCGM_FI_DEV_GPU_UTIL,gauge,GPU utilization percentage
+    DCGM_FI_DEV_MEM_COPY_UTIL,gauge,Memory utilization percentage
+    DCGM_FI_DEV_ENC_UTIL,gauge,Encoder utilization percentage
+    DCGM_FI_DEV_DEC_UTIL,gauge,Decoder utilization percentage
+    DCGM_FI_DEV_FB_USED,gauge,Frame buffer memory used in MB
+    DCGM_FI_DEV_POWER_USAGE,gauge,Power usage in watts
+    DCGM_FI_DEV_GPU_TEMP,gauge,GPU temperature in degrees C
+    
+    # Clock Speed Metrics
+    DCGM_FI_DEV_SM_CLOCK,gauge,SM Clock in MHz
+    DCGM_FI_DEV_MEM_CLOCK,gauge,Memory Clock in MHz
+    
+    # Advanced Utilization Metrics
+    DCGM_FI_PROF_GR_ENGINE_ACTIVE,gauge,Graphic engine active percentage
+    DCGM_FI_PROF_SM_ACTIVE,gauge,SM utilization percentage
+    DCGM_FI_PROF_PIPE_TENSOR_ACTIVE,gauge,Tensor core utilization percentage
+    DCGM_FI_PROF_PIPE_FP64_ACTIVE,gauge,FP64 utilization percentage
+    DCGM_FI_PROF_PIPE_FP32_ACTIVE,gauge,FP32 utilization percentage
+    DCGM_FI_PROF_PIPE_FP16_ACTIVE,gauge,FP16 utilization percentage
+    DCGM_FI_PROF_DRAM_ACTIVE,gauge,Memory bandwidth utilization percentage
+
+    # PCIe and NvLink Throughput Metrics
+    DCGM_FI_DEV_PCIE_TX_THROUGHPUT,gauge,PCIe TX throughput in MB/s
+    DCGM_FI_DEV_PCIE_RX_THROUGHPUT,gauge,PCIe RX throughput in MB/s
+    DCGM_FI_PROF_NVLINK_TX_BYTES,gauge,NvLink TX throughput in bytes
+    DCGM_FI_PROF_NVLINK_RX_BYTES,gauge,NvLink RX throughput in bytes
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-dcgm-exporter
+  namespace: gmp-system
+spec:
+  selector:
+    matchLabels:
+      app: nvidia-dcgm-exporter
+  template:
+    metadata:
+      labels:
+        app: nvidia-dcgm-exporter
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9400"
+    spec:
+      hostNetwork: true
+      hostPID: true
+      containers:
+      - name: dcgm-exporter
+        image: nvcr.io/nvidia/k8s/dcgm-exporter:3.1.7-3.1.4-ubuntu20.04
+        ports:
+        - containerPort: 9400
+          name: metrics
+          protocol: TCP
+        securityContext:
+          privileged: true
+          capabilities:
+            add:
+            - SYS_ADMIN
+        volumeMounts:
+        - name: dcgm-config
+          mountPath: /etc/dcgm-exporter
+        - name: nvidia-install-dir-host
+          mountPath: /usr/local/nvidia
+          readOnly: true
+        - name: kubelet-socket
+          mountPath: /var/lib/kubelet/pod-resources
+          readOnly: true
+        env:
+        - name: DCGM_EXPORTER_LISTEN
+          value: ":9400"
+        - name: DCGM_EXPORTER_KUBERNETES
+          value: "true"
+        - name: DCGM_EXPORTER_COLLECTORS
+          value: "/etc/dcgm-exporter/custom-collectors.csv"
+        - name: NVIDIA_VISIBLE_DEVICES
+          value: "all"
+        - name: NVIDIA_DRIVER_CAPABILITIES
+          value: "utility"
+        - name: LD_LIBRARY_PATH
+          value: "/usr/local/nvidia/lib64"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+      volumes:
+      - name: dcgm-config
+        configMap:
+          name: dcgm-metrics-config
+      - name: nvidia-install-dir-host
+        hostPath:
+          path: /home/kubernetes/bin/nvidia
+          type: Directory
+      - name: kubelet-socket
+        hostPath:
+          path: /var/lib/kubelet/pod-resources
+          type: Directory
+      nodeSelector:
+        cloud.google.com/gke-accelerator: nvidia-tesla-t4
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: cloud.google.com/gke-accelerator
+                operator: In
+                values:
+                - nvidia-tesla-t4
